@@ -1,96 +1,159 @@
-import { fetchImages } from './js/fetch-images';
-import { getImageTemplate } from './js/image-markup';
-import { smoothScroll } from './js/smooth-scroll';
+import axios from "axios";
+import Notiflix from "notiflix";
+import SimpleLightbox from "simplelightbox";
+import 'simplelightbox/dist/simple-lightbox.min.css'
 
-import SimpleLightbox from 'simplelightbox';
-import { Notify } from 'notiflix';
+const form = document.querySelector("#search-form");
+const input = document.querySelector("#search-form input");
+const gallery = document.querySelector(".gallery");
+const loadBtn = document.querySelector(".load-more");
+loadBtn.style.display = 'none';
 
-import 'simplelightbox/dist/simple-lightbox.min.css';
-import './sass/index.scss';
+let qValue; 
+let page=1;
+let searchedValue;
+let pictures;
+let totalHitsNumber;
 
-const refs = {
-  searchForm: document.querySelector('.search-form'),
-  gallery: document.querySelector('.gallery'),
-  loadMoreBtn: document.querySelector('.load-more'),
-  formInput: document.querySelector('[name="searchQuery"]'),
-};
-
-let page = 1;
-const per_page = 40;
-let searchQuery = null;
-let images = [];
-let totalPages = 0;
-
-refs.formInput.setAttribute('required', true);
-refs.searchForm.addEventListener('submit', onSearch);
-refs.loadMoreBtn.addEventListener('click', onLoadMore);
-
-async function onSearch(e) {
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  cleanMarkup();
-  searchQuery = e.currentTarget.searchQuery.value.trim();
-  lockLoadMoreBtn();
-  if (searchQuery === '') {
-    cleanMarkup();
-    lockLoadMoreBtn();
-    Notify.warning('Please enter your query');
+  //gallery.innerHTML = '';
+  loadBtn.style.display = 'block';
+  gallery.innerHTML ='';
+  searchedValue = input.value.trim();
+
+  // Empty input to fetch
+  if (!searchedValue) {
+    loadBtn.style.display = 'none';
+    Notiflix.Notify.info('Please enter keywords again');
     return;
   }
+  
+  qValue = searchedValue.split(" ").join("+");
 
-  page = 1;
+  try {
+    pictures = await fetchPixabay(qValue, page);
+    renderGallery(pictures);
+    page += 1;
+    
+    totalHitsNumber = pictures.totalHits;
 
-  const response = await fetchImages(searchQuery, page, per_page);
-  const totalImages = response.data.totalHits;
-  images = response.data.hits;
-  totalPages = totalImages / per_page;
+    // if no images matches to searched value
+    if (!pictures.totalHits) {
+      loadBtn.style.display = 'none';
+      Notiflix.Notify.warning('Sorry, there are no images matching your search query. Please try again.')
+      return;
+    } else {
+      Notiflix.Notify.success(`Hooray! We found ${pictures.totalHits} images.`)
+    };
 
-  if (images.length > 0) {
-    Notify.success(`Hooray! We found ${totalImages} images.`);
-    unlockLoadMoreBtn();
-  } else {
-    Notify.failure(
-      'Sorry, there are no images matching your search query. Please try again.'
-    );
-    lockLoadMoreBtn();
+    // if it's the end of search results
+    if (pictures.totalHits < 40) {
+      gallery.insertAdjacentHTML("beforeend", `<h2 class = 'end-message'>We're sorry, but you've reached the end of search results</h2>`)
+      loadBtn.style.display = 'none';
+    }
+
+  } catch (error) {
+    console.log(error.message);
+    Notiflix.Notify.failure('Oops! There is a problem with searching, try again');
   }
-  cleanMarkup();
-  render();
+  form.reset()
+});
+
+//Load more posts
+loadBtn.addEventListener("click", loadMore)
+  
+async function loadMore(){
+
+  try {
+    pictures = await fetchPixabay(qValue, page);
+    renderGallery(pictures);
+    page+=1;
+    totalHitsNumber -= 40; 
+   
+    const { height: cardHeight } = document
+      .querySelector('.gallery')
+      .firstElementChild.getBoundingClientRect('.photo-card');
+
+    window.scrollBy({
+      top: cardHeight,
+      behavior: 'smooth',
+    });
+    
+    // if it's the end of search results
+   if (totalHitsNumber <40) {
+      gallery.insertAdjacentHTML("beforeend", "<h2 class = 'end-message'>We're sorry, but you've reached the end of search results</h2>")
+     loadBtn.style.display = 'none';
+    }
+  }  
+    catch (error) {
+    console.log(error.message);
+    Notiflix.Notify.failure('Oops, there is some problem with loading more photos!');
+  }
+
+};
+
+async function fetchPixabay(qValue, page) {
+    const searchParams = new URLSearchParams({
+    key: "42474865-55c278fe0045234625bd75cd9",
+    q: qValue,
+    image_type: "photo",
+    orientation: "horizontal",
+    safesearch: "true",
+    per_page: "40",
+    page: page,
+    });
+
+  const response = await axios
+    .get(`https://pixabay.com/api/?${searchParams}`);
+
+  return response.data;
 }
 
-async function onLoadMore(e) {
-  page += 1;
-  const response = await fetchImages(searchQuery, page, per_page);
-  images = response.data.hits;
-  const totalImages = response.data.totalHits;
-  totalPages = totalImages / per_page;
+function renderGallery(items) {
+  const markup = items.hits.map(({ webformatURL, largeImageURL, tags, likes, views, comments, downloads}) => {
+            return `<div class="photo-card">
+            <a href="${largeImageURL}">
+              <img src="${webformatURL}" alt="${tags}" loading="lazy" />
+            </a>
+            <div class="info">
+              <p class="info-item">
+              <b>${likes} Likes</b>
+              </p>
+              <p class="info-item">
+              <b>${views} Views</b>
+              </p>
+              <p class="info-item">
+              <b>${comments} Comments</b>
+              </p>
+              <p class="info-item">
+              <b>${downloads} Downloads</b>
+              </p>
+            </div>
+          </div>`;
+            })
+        .join("");
+  gallery.insertAdjacentHTML('beforeend', markup);
 
-  if (totalPages <= page) {
-    Notify.info("We're sorry, but you've reached the end of search results.");
-    lockLoadMoreBtn();
-  }
-  render();
-  smoothScroll('.gallery');
-}
-
-function render() {
-  const items = images;
-
-  const galleryMarkup = items.map(getImageTemplate);
-
-  refs.gallery.insertAdjacentHTML('beforeend', galleryMarkup.join(''));
-
-  const lightbox = new SimpleLightbox('.gallery a');
+  // Insert Lightbox
+  const lightbox = new SimpleLightbox('.gallery a', { captionsData: 'alt' });
   lightbox.refresh();
+
 }
 
-function lockLoadMoreBtn() {
-  refs.loadMoreBtn.classList.add('hidden');
-}
+// listen for scroll event and load more images if we reach the bottom of window
+//window.addEventListener('scroll', infiniteScroll, {
+//    passive: true
+//});
 
-function unlockLoadMoreBtn() {
-  refs.loadMoreBtn.classList.toggle('hidden', totalPages <= page);
-}
-
-function cleanMarkup() {
-  refs.gallery.innerHTML = '';
-}
+//function infiniteScroll() {
+//    const {
+//        scrollTop,
+ //       scrollHeight,
+ //       clientHeight
+ //   } = document.documentElement;
+//
+ //   if (scrollTop + clientHeight >= scrollHeight - 5){
+ //     loadMore();
+//    }
+//}
